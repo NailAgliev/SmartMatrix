@@ -1,5 +1,5 @@
 /*
- * SmartMatrix Library - Generic Layer Class
+ * SmartMatrix Library - Main Refresh Class
  *
  * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
@@ -21,20 +21,18 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "Layer.h"
+#include "SmartMatrix3.h"
 
-void SM_Layer::setRotation(rotationDegrees newrotation) {
-    rotation = newrotation;
-
-    if (rotation == rotation0 || rotation == rotation180) {
-        localWidth = matrixWidth;
-        localHeight = matrixHeight;
-    } else {
-        localWidth = matrixHeight;
-        localHeight = matrixWidth;
-    }
-}
-
-void SM_Layer::setRefreshRate(uint8_t newRefreshRate) {
-    refreshRate = newRefreshRate;
-}
+#if defined(KINETISL)
+    DMAChannel dmaClockOutData(false);
+    DMAChannel dmaClockOutData2(false);
+#elif defined(KINETISK)
+    #ifndef ADDX_UPDATE_ON_DATA_PINS
+        DMAChannel dmaOutputAddress(false);
+        DMAChannel dmaUpdateAddress(false);
+    #endif
+    DMAChannel dmaUpdateTimer(false);
+    DMAChannel dmaClockOutData(false);
+    DMAChannel dmaClockOutDataApa(false);
+    DMAChannel dmaClockOutDataCoprocessorSend(false);
+#endif

@@ -1,7 +1,7 @@
 /*
  * SmartMatrix Library - Scrolling Layer Class
  *
- * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
+ * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -37,11 +37,7 @@ SMLayerScrolling<RGB, optionFlags>::SMLayerScrolling(uint8_t * bitmap, uint16_t 
 template <typename RGB, unsigned int optionFlags>
 SMLayerScrolling<RGB, optionFlags>::SMLayerScrolling(uint16_t width, uint16_t height) {
     scrollingBitmap = (uint8_t *)malloc(width * (height / 8));
-#ifdef ESP32
     assert(scrollingBitmap != NULL);
-#else
-    this->assert(scrollingBitmap != NULL);
-#endif
     memset(scrollingBitmap, 0x00, width * (height / 8));
     this->matrixWidth = width;
     this->matrixHeight = height;
@@ -63,7 +59,7 @@ bool SMLayerScrolling<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t h
     uint16_t localScreenX, localScreenY;
 
     // convert hardware x/y to the pixel in the local screen
-    switch( this->layerRotation ) {
+    switch( this->rotation ) {
       case rotation0 :
         localScreenX = hardwareX;
         localScreenY = hardwareY;
@@ -100,7 +96,7 @@ bool SMLayerScrolling<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t h
     uint16_t localScreenX, localScreenY;
 
     // convert hardware x/y to the pixel in the local screen
-    switch( this->layerRotation ) {
+    switch( this->rotation ) {
       case rotation0 :
         localScreenX = hardwareX;
         localScreenY = hardwareY;
@@ -132,7 +128,7 @@ bool SMLayerScrolling<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t h
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerScrolling<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[], int brightnessShifts) {
+void SMLayerScrolling<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[]) {
     rgb48 currentPixel;
     int i;
 
@@ -150,7 +146,7 @@ void SMLayerScrolling<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb4
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerScrolling<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[], int brightnessShifts) {
+void SMLayerScrolling<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[]) {
     rgb24 currentPixel;
     int i;
 
@@ -351,6 +347,7 @@ void SMLayerScrolling<RGB, optionFlags>::redrawScrollingText(void) {
     int charPosition, textPosition;
     uint16_t charY0, charY1;
 
+
     for (j = 0; j < this->localHeight; j++) {
 
         // skip rows without text
@@ -411,3 +408,12 @@ void SMLayerScrolling<RGB, optionFlags>::redrawScrollingText(void) {
         j += (charY1 - charY0) - 1;
     }
 }
+
+template <typename RGB, unsigned int optionFlags>
+bool SMLayerScrolling<RGB, optionFlags>::getBitmapPixelAtXY(uint8_t x, uint8_t y, uint8_t width, uint8_t height, const uint8_t *bitmap) {
+    int cell = (y * ((width / 8) + 1)) + (x / 8);
+
+    uint8_t mask = 0x80 >> (x % 8);
+    return (mask & bitmap[cell]);
+}
+

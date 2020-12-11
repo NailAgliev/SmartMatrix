@@ -1,7 +1,7 @@
 /*
  * SmartMatrix Library - Indexed Layer Class
  *
- * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
+ * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -23,6 +23,9 @@
 
 #include <string.h>
 
+const unsigned char indexedDrawBuffer = 0;
+const unsigned char indexedRefreshBuffer = 1;
+
 #define INDEXED_BUFFER_ROW_SIZE     (this->localWidth / 8)
 #define INDEXED_BUFFER_SIZE         (INDEXED_BUFFER_ROW_SIZE * this->localHeight)
 
@@ -39,11 +42,7 @@ template <typename RGB, unsigned int optionFlags>
 SMLayerIndexed<RGB, optionFlags>::SMLayerIndexed(uint16_t width, uint16_t height) {
     // size of bitmap is 2 * INDEXED_BUFFER_SIZE
     indexedBitmap = (uint8_t*)malloc(2 * width * (height / 8));
-#ifdef ESP32
     assert(indexedBitmap != NULL);
-#else
-    this->assert(indexedBitmap != NULL);
-#endif
     memset(indexedBitmap, 0x00, 2 * width * (height / 8));
     this->matrixWidth = width;
     this->matrixHeight = height;
@@ -52,14 +51,11 @@ SMLayerIndexed<RGB, optionFlags>::SMLayerIndexed(uint16_t width, uint16_t height
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerIndexed<RGB, optionFlags>::begin(void) {
-    currentDrawBuffer = 0;
-    currentRefreshBuffer = 1;
-    swapPending = false;
 }
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerIndexed<RGB, optionFlags>::frameRefreshCallback(void) {
-    handleBufferSwap();
+    handleBufferCopy();
 }
 
 // returns true and copies color to xyPixel if pixel is opaque, returns false if not
@@ -68,7 +64,7 @@ bool SMLayerIndexed<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t har
     uint16_t localScreenX, localScreenY;
 
     // convert hardware x/y to the pixel in the local screen
-    switch( this->layerRotation ) {
+    switch( this->rotation ) {
       case rotation0 :
         localScreenX = hardwareX;
         localScreenY = hardwareY;
@@ -92,7 +88,7 @@ bool SMLayerIndexed<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t har
 
     uint8_t bitmask = 0x80 >> (localScreenX % 8);
 
-    if (indexedBitmap[(currentRefreshBuffer * INDEXED_BUFFER_SIZE) + (localScreenY * INDEXED_BUFFER_ROW_SIZE) + (localScreenX/8)] & bitmask) {
+    if (indexedBitmap[(indexedRefreshBuffer * INDEXED_BUFFER_SIZE) + (localScreenY * INDEXED_BUFFER_ROW_SIZE) + (localScreenX/8)] & bitmask) {
         xyPixel = color;
         return true;
     }
@@ -101,7 +97,7 @@ bool SMLayerIndexed<RGB, optionFlags>::getPixel(uint16_t hardwareX, uint16_t har
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerIndexed<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[], int brightnessShifts) {
+void SMLayerIndexed<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[]) {
     RGB currentPixel;
     int i;
 
@@ -124,7 +120,7 @@ void SMLayerIndexed<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerIndexed<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[], int brightnessShifts) {
+void SMLayerIndexed<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[]) {
     RGB currentPixel;
     int i;
 
@@ -164,66 +160,40 @@ void SMLayerIndexed<RGB, optionFlags>::fillScreen(uint8_t index) {
     else
         fillValue = 0x00;
 
-    memset(&indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE], fillValue, INDEXED_BUFFER_SIZE);
+    memset(&indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE], fillValue, INDEXED_BUFFER_SIZE);
 }
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerIndexed<RGB, optionFlags>::swapBuffers(bool copy) {
-    while (swapPending);
+    while (copyPending);
 
-    swapPending = true;
+    copyPending = true;
 
-    if(copy) {
-        while(swapPending);
-
-#if 1
-        // workaround for bizarre (optimization) bug - currentDrawBuffer and currentRefreshBuffer are volatile and are changed by an ISR while we're waiting for swapPending here.  They can't be used as parameters to memcpy directly though.  
-        if(currentDrawBuffer)
-            memcpy(&indexedBitmap[INDEXED_BUFFER_SIZE], &indexedBitmap[0], INDEXED_BUFFER_SIZE);
-        else
-            memcpy(&indexedBitmap[0], &indexedBitmap[INDEXED_BUFFER_SIZE], INDEXED_BUFFER_SIZE);
-#else
-        // below is untested after copying from backgroundLayer to indexedLayer:
-
-        // Similar code also drawing from volatile variables doesn't work if optimization is turned on: currentDrawBuffer will be equal to currentRefreshBuffer and cause a crash from memcpy copying a buffer to itself.  Why?
-        memcpy(&indexedBitmap[currentRefreshBuffer*INDEXED_BUFFER_SIZE], &indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE], INDEXED_BUFFER_SIZE);
-
-        // this also doesn't work
-        //copyRefreshToDrawing();  
-
-        // first checking for (currentDrawBuffer != currentRefreshBuffer) prevents a crash by skipping the copy, but currentDrawBuffer should never be equal to currentRefreshBuffer, except briefly inside an ISR during handleBufferSwap() call
-        //if(currentDrawBuffer != currentRefreshBuffer)     
-        //   memcpy(backgroundBuffers[currentDrawBuffer], backgroundBuffers[currentRefreshBuffer], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
-#endif
-    }
+    while (copy && copyPending);
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerIndexed<RGB, optionFlags>::handleBufferSwap(void) {
-    if (!swapPending)
+void SMLayerIndexed<RGB, optionFlags>::handleBufferCopy(void) {
+    if (!copyPending)
         return;
 
-    unsigned char newDrawBuffer = currentRefreshBuffer;
-
-    currentRefreshBuffer = currentDrawBuffer;
-    currentDrawBuffer = newDrawBuffer;
-
-    swapPending = false;
+    memcpy(&indexedBitmap[indexedRefreshBuffer*INDEXED_BUFFER_SIZE], &indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE], INDEXED_BUFFER_SIZE);
+    copyPending = false;
 }
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerIndexed<RGB, optionFlags>::drawPixel(int16_t x, int16_t y, uint8_t index) {
     uint8_t tempBitmask;
 
-    if(x < 0 || x >= this->localWidth || y < 0 || y >= this->localHeight)
+    if(x < 0 || x >= this->localWidth || y < 0 || y >= this->localWidth)
         return;
 
     if(index) {
         tempBitmask = 0x80 >> (x%8);
-        indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE + (y * INDEXED_BUFFER_ROW_SIZE) + (x/8)] |= tempBitmask;
+        indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE + (y * INDEXED_BUFFER_ROW_SIZE) + (x/8)] |= tempBitmask;
     } else {
         tempBitmask = ~(0x80 >> (x%8));
-        indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE + (y * INDEXED_BUFFER_ROW_SIZE) + (x/8)] &= tempBitmask;
+        indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE + (y * INDEXED_BUFFER_ROW_SIZE) + (x/8)] &= tempBitmask;
     }
 }
 
@@ -250,24 +220,25 @@ void SMLayerIndexed<RGB, optionFlags>::drawChar(int16_t x, int16_t y, uint8_t in
 
         tempBitmask = getBitmapFontRowAtXY(character, k - y, layerFont);
         if (x < 0) {
-            indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + 0] |= tempBitmask << -x;
+            indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + 0] |= tempBitmask << -x;
         } else {
-            indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + (x/8)] |= tempBitmask >> (x%8);
+            indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + (x/8)] |= tempBitmask >> (x%8);
             // do two writes if the shifted 8-bit wide bitmask is still on the screen
             if(x + 8 < this->localWidth && x % 8)
-                indexedBitmap[currentDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + (x/8) + 1] |= tempBitmask << (8-(x%8));
+                indexedBitmap[indexedDrawBuffer*INDEXED_BUFFER_SIZE + (k * INDEXED_BUFFER_ROW_SIZE) + (x/8) + 1] |= tempBitmask << (8-(x%8));
         }
     }
 }
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerIndexed<RGB, optionFlags>::drawString(int16_t x, int16_t y, uint8_t index, const char text []) {
-    int offset = 0;
-    char character;
+    // limit text to 10 chars, why?
+    for (int i = 0; i < 10; i++) {
+        char character = text[i];
+        if (character == '\0')
+            return;
 
-    while ((character = text[offset++]) != '\0') {
-        drawChar(x, y, index, character);
-        x += layerFont->Width;
+        drawChar(i * layerFont->Width + x, y, index, character);
     }
 }
 

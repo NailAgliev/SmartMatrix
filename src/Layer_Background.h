@@ -1,7 +1,7 @@
 /*
  * SmartMatrix Library - Background Layer Class
  *
- * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
+ * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -33,20 +33,16 @@
 template <typename RGB, unsigned int optionFlags>
 class SMLayerBackground : public SM_Layer {
     public:
-        SMLayerBackground(RGB * buffer, uint16_t width, uint16_t height, color_chan_t * colorCorrectionLUT);
+        SMLayerBackground(RGB * buffer, uint16_t width, uint16_t height);
         SMLayerBackground(uint16_t width, uint16_t height);
         void begin(void);
         void frameRefreshCallback();
-        void fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[], int brightnessShifts = 0);
-        void fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[], int brightnessShifts = 0);
-        int getRequestedBrightnessShifts();
-        bool isLayerChanged();
-        
+        void fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[]);
+        void fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[]);
+
         void swapBuffers(bool copy = true);
         bool isSwapPending();
         void copyRefreshToDrawing(void);
-        void setBrightnessShifts(int numShifts);
-
         void drawPixel(int16_t x, int16_t y, const RGB& color);
         void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, const RGB& color);
         void drawFastVLine(int16_t x, int16_t y0, int16_t y1, const RGB& color);
@@ -85,7 +81,7 @@ class SMLayerBackground : public SM_Layer {
         void enableColorCorrection(bool enabled);
 
     private:
-        bool ccEnabled = true;
+        bool ccEnabled = sizeof(RGB) <= 3 ? true : false;
 
         RGB *currentDrawBufferPtr;
         RGB *currentRefreshBufferPtr;
@@ -104,15 +100,12 @@ class SMLayerBackground : public SM_Layer {
         void drawHardwareVLine(uint16_t x, uint16_t y0, uint16_t y1, const RGB& color);
         void bresteepline(int16_t x3, int16_t y3, int16_t x4, int16_t y4, const RGB& color);
         void fillFlatSideTriangleInt(int16_t x1, int16_t y1, int16_t x2, int16_t y2, int16_t x3, int16_t y3, const RGB& color);
+        // todo: move somewhere else
+        static bool getBitmapPixelAtXY(uint8_t x, uint8_t y, uint8_t width, uint8_t height, const uint8_t *bitmap);
 
         uint8_t backgroundBrightness = 255;
-        color_chan_t * backgroundColorCorrectionLUT;
+        color_chan_t backgroundColorCorrectionLUT[256];
         bitmap_font *font;
-
-        // idealBrightnessShifts is the number of shifts towards MSB the pixel data can handle without overflowing
-        int idealBrightnessShifts = 0;
-        // pendingIdealBrightnessShifts keeps track of the data queued up with swapBuffers()
-        int pendingIdealBrightnessShifts = 0;
 
         // keeping track of drawing buffers
         volatile unsigned char currentDrawBuffer;

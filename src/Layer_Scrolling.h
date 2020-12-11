@@ -1,7 +1,7 @@
 /*
  * SmartMatrix Library - Scrolling Layer Class
  *
- * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
+ * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -30,6 +30,15 @@
 // scroll text
 const int textLayerMaxStringLength = 100;
 
+typedef enum ScrollMode {
+    wrapForward,
+    bounceForward,
+    bounceReverse,
+    stopped,
+    off,
+    wrapForwardFromLeft,
+} ScrollMode;
+
 #define SM_SCROLLING_OPTIONS_NONE     0
 
 // font
@@ -42,8 +51,8 @@ class SMLayerScrolling : public SM_Layer {
         SMLayerScrolling(uint16_t width, uint16_t height);
         void begin(void);
         void frameRefreshCallback();
-        void fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[], int brightnessShifts = 0);
-        void fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[], int brightnessShifts = 0);
+        void fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[]);
+        void fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[]);
 
         void setRefreshRate(uint8_t newRefreshRate);
 
@@ -66,6 +75,8 @@ class SMLayerScrolling : public SM_Layer {
         void redrawScrollingText(void);
         void setMinMax(void);
 
+        // todo: move somewhere else
+        static bool getBitmapPixelAtXY(uint8_t x, uint8_t y, uint8_t width, uint8_t height, const uint8_t *bitmap);
         void updateScrollingText(void);
 
         template <typename RGB_OUT>

@@ -6,16 +6,8 @@
 
 #include "MatrixFontCommon.h"
 
-#if defined(__IMXRT1062__) // For Teensy 4.0/4.1, use PROGMEM to keep font bitmaps in flash
-  #define PROGMEM __attribute__((section(".progmem"))) // from <avr/pgmspace.h>
-#else
-  #if !defined(PROGMEM)
-    #define PROGMEM
-  #endif
-#endif
- 
 	/// character bitmap for each encoding
-static const PROGMEM unsigned char __apple3x5_bitmap__[] = {
+static const unsigned char __apple3x5_bitmap__[] = {
 //   0 $00 'char0'
 //	width 4, bbx 0, bby -1, bbw 4, bbh 6
 	X_X_____,
@@ -1556,7 +1548,7 @@ static const PROGMEM unsigned char __apple3x5_bitmap__[] = {
 
 
 	/// character encoding for each index entry
-static const PROGMEM unsigned short __apple3x5_index__[] = {
+static const unsigned short __apple3x5_index__[] = {
 	0,
 	32,
 	33,
@@ -1759,3 +1751,4 @@ const struct bitmap_font apple3x5 = {
 	.Index = __apple3x5_index__,
 	.Bitmap = __apple3x5_bitmap__,
 };
+

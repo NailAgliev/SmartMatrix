@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#define ESP32
-
 #if defined(ESP32)
 
 #include <stdio.h>
@@ -29,9 +27,7 @@
 #include "soc/i2s_struct.h"
 #include "soc/i2s_reg.h"
 #include "driver/periph_ctrl.h"
-#include "driver/gpio.h"
 #include "soc/io_mux_reg.h"
-#include "soc/gpio_periph.h"
 #include "rom/lldesc.h"
 #include "esp_heap_caps.h"
 #include "esp32_i2s_parallel.h"
@@ -128,14 +124,14 @@ void link_dma_desc(volatile lldesc_t *dmadesc, volatile lldesc_t *prevdmadesc, v
 static void gpio_setup_out(int gpio, int sig) {
     if (gpio==-1) return;
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[gpio], PIN_FUNC_GPIO);
-    gpio_set_direction(gpio, GPIO_MODE_OUTPUT);
+    gpio_set_direction(gpio, GPIO_MODE_DEF_OUTPUT);
     gpio_matrix_out(gpio, sig, false, false);
 }
 
 static void gpio_setup_out_invert(int gpio, int sig) {
     if (gpio==-1) return;
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[gpio], PIN_FUNC_GPIO);
-    gpio_set_direction(gpio, GPIO_MODE_OUTPUT);
+    gpio_set_direction(gpio, GPIO_MODE_DEF_OUTPUT);
     gpio_matrix_out(gpio, sig, true, false);
 }
 
@@ -274,7 +270,7 @@ void i2s_parallel_setup(i2s_dev_t *dev, const i2s_parallel_config_t *cfg) {
 
 void i2s_parallel_setup_without_malloc(i2s_dev_t *dev, const i2s_parallel_config_t *cfg) {
     //Figure out which signal numbers to use for routing
-    //printf("Setting up parallel I2S bus at I2S%d\n", i2snum(dev));
+    printf("Setting up parallel I2S bus at I2S%d\n", i2snum(dev));
     int sig_data_base, sig_clk;
     if (dev==&I2S0) {
         sig_data_base=I2S0O_DATA_OUT0_IDX;

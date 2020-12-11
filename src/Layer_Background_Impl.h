@@ -1,7 +1,7 @@
 /*
  * SmartMatrix Library - Background Layer Class
  *
- * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
+ * Copyright (c) 2015 Louis Beaudoin (Pixelmatix)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -23,17 +23,16 @@
 
 #include <stdlib.h>     
 
-// call when backgroundBuffers and backgroundColorCorrectionLUT buffer is allocated outside of class
+// call when buffer is allocated outside of class
 template <typename RGB, unsigned int optionFlags>
-SMLayerBackground<RGB, optionFlags>::SMLayerBackground(RGB * buffer, uint16_t width, uint16_t height, color_chan_t * colorCorrectionLUT) {
+SMLayerBackground<RGB, optionFlags>::SMLayerBackground(RGB * buffer, uint16_t width, uint16_t height) {
     backgroundBuffers[0] = buffer;
     backgroundBuffers[1] = buffer + (width * height);
-    backgroundColorCorrectionLUT = colorCorrectionLUT;
     this->matrixWidth = width;
     this->matrixHeight = height;
 }
 
-// call this when buffers should be sourced from malloc inside begin()
+// call this when buffer should be sourced from malloc inside begin()
 template <typename RGB, unsigned int optionFlags>
 SMLayerBackground<RGB, optionFlags>::SMLayerBackground(uint16_t width, uint16_t height) {
     this->matrixWidth = width;
@@ -43,26 +42,14 @@ SMLayerBackground<RGB, optionFlags>::SMLayerBackground(uint16_t width, uint16_t 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::begin(void) {
 #if defined(ESP32)
-#ifdef BOARD_HAS_PSRAM
-#define ESPmalloc ps_malloc
-#else
-#define ESPmalloc malloc
-#endif
     if(!backgroundBuffers[0] && !backgroundBuffers[1]) {
         //printf("largest free block %d: \r\n", heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
-        backgroundBuffers[0] = (RGB *)ESPmalloc(sizeof(RGB) * this->matrixWidth * this->matrixHeight);
+        backgroundBuffers[0] = (RGB *)calloc(this->matrixWidth * this->matrixHeight, sizeof(RGB));
         assert(backgroundBuffers[0] != NULL);
         //printf("largest free block %d: \r\n", heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
-        backgroundBuffers[1] = (RGB *)ESPmalloc(sizeof(RGB) * this->matrixWidth * this->matrixHeight);
+        backgroundBuffers[1] = (RGB *)calloc(this->matrixWidth * this->matrixHeight, sizeof(RGB));
         assert(backgroundBuffers[1] != NULL);
         //printf("largest free block %d: \r\n", heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
-        memset(backgroundBuffers[0], 0x00, sizeof(RGB) * this->matrixWidth * this->matrixHeight);
-        memset(backgroundBuffers[1], 0x00, sizeof(RGB) * this->matrixWidth * this->matrixHeight);
-        //printf("largest free block %d: \r\n", heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
-    }
-    if(!backgroundColorCorrectionLUT) {
-        backgroundColorCorrectionLUT = (color_chan_t *)malloc(sizeof(color_chan_t) * (sizeof(RGB) <= 3 ? 256 : 4096));
-        assert(backgroundColorCorrectionLUT != NULL);
         //printf("largest free block %d: \r\n", heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     }
 #endif
@@ -80,106 +67,49 @@ template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::frameRefreshCallback(void) {
     handleBufferSwap();
 
-    if(sizeof(RGB) > 3)
-        calculate12BitBackgroundLUT(backgroundColorCorrectionLUT, backgroundBrightness);
-    else
-        calculate8BitBackgroundLUT(backgroundColorCorrectionLUT, backgroundBrightness);
+    calculateBackgroundLUT(backgroundColorCorrectionLUT, backgroundBrightness);
 }
 
 template <typename RGB, unsigned int optionFlags>
-int SMLayerBackground<RGB, optionFlags>::getRequestedBrightnessShifts() {
-    return idealBrightnessShifts;
-}
-
-template <typename RGB, unsigned int optionFlags>
-bool SMLayerBackground<RGB, optionFlags>::isLayerChanged() {
-    return swapPending;
-}
-
-// numShifts must be in range of 0-4, otherwise 16-bit to 12-bit conversion code breaks (would be an easy fix, but 4 is enough for APA102 GBC application)
-template <typename RGB, unsigned int optionFlags>
-void SMLayerBackground<RGB, optionFlags>::setBrightnessShifts(int numShifts) {
-    pendingIdealBrightnessShifts = numShifts;
-}
-
-template <typename RGB, unsigned int optionFlags>
-void SMLayerBackground<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[], int brightnessShifts) {
+void SMLayerBackground<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb48 refreshRow[]) {
     RGB currentPixel;
     int i;
 
-    RGB *ptr = currentRefreshBufferPtr + (hardwareY * this->matrixWidth);
-
     if(this->ccEnabled) {
         for(i=0; i<this->matrixWidth; i++) {
-            currentPixel = *ptr++;
+            currentPixel = currentRefreshBufferPtr[(hardwareY * this->matrixWidth) + i];
             // load background pixel with color correction
-            if(sizeof(RGB) <= 3) {
-                // 24-bit source (8 bits per color channel): backgroundColorCorrectionLUT expects 8-bit value, returns 16-bit value
-                refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red << brightnessShifts],
-                    backgroundColorCorrectionLUT[currentPixel.green << brightnessShifts],
-                    backgroundColorCorrectionLUT[currentPixel.blue << brightnessShifts]);                
-            } else {
-                // 48-bit source (16 bits per color channel): backgroundColorCorrectionLUT expects 12-bit value, returns 16-bit value
-                refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red >> (4 - brightnessShifts)],
-                    backgroundColorCorrectionLUT[currentPixel.green >> (4 - brightnessShifts)],
-                    backgroundColorCorrectionLUT[currentPixel.blue >> (4 - brightnessShifts)]);
-            }
+            refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red],
+                backgroundColorCorrectionLUT[currentPixel.green],
+                backgroundColorCorrectionLUT[currentPixel.blue]);
         }
     } else {
         for(i=0; i<this->matrixWidth; i++) {
-            currentPixel = *ptr++;
+            currentPixel = currentRefreshBufferPtr[(hardwareY * this->matrixWidth) + i];
             // load background pixel without color correction
-            if(sizeof(RGB) <= 3) {
-                // 24-bit source (8 bits per color channel): shift to fit in 16-bit color channel
-                refreshRow[i] = rgb48(currentPixel.red << (brightnessShifts + 8),
-                    currentPixel.green << (brightnessShifts + 8),
-                    currentPixel.blue << (brightnessShifts + 8));
-            } else {
-                // 48-bit source (16 bits per color channel): no shifting needed to fit in 16-bit color channel
-                refreshRow[i] = rgb48(currentPixel.red << brightnessShifts,
-                    currentPixel.green << brightnessShifts,
-                    currentPixel.blue << brightnessShifts);                
-            }
+            refreshRow[i] = currentPixel;
         }
     }
 }
 
 template <typename RGB, unsigned int optionFlags>
-void SMLayerBackground<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[], int brightnessShifts) {
+void SMLayerBackground<RGB, optionFlags>::fillRefreshRow(uint16_t hardwareY, rgb24 refreshRow[]) {
     RGB currentPixel;
     int i;
 
-    RGB *ptr = currentRefreshBufferPtr + (hardwareY * this->matrixWidth);
-
     if(this->ccEnabled) {
         for(i=0; i<this->matrixWidth; i++) {
-            currentPixel = *ptr++;
+            currentPixel = currentRefreshBufferPtr[(hardwareY * this->matrixWidth) + i];
             // load background pixel with color correction
-            if(sizeof(RGB) <= 3) {
-                // 24-bit source (8 bits per color channel): backgroundColorCorrectionLUT expects 8-bit value, returns 16-bit value
-                refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red << brightnessShifts],
-                    backgroundColorCorrectionLUT[currentPixel.green << brightnessShifts],
-                    backgroundColorCorrectionLUT[currentPixel.blue << brightnessShifts]);                
-            } else {
-                // 48-bit source (16 bits per color channel): backgroundColorCorrectionLUT expects 12-bit value, returns 16-bit value
-                refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red >> (4 - brightnessShifts)],
-                    backgroundColorCorrectionLUT[currentPixel.green >> (4 - brightnessShifts)],
-                    backgroundColorCorrectionLUT[currentPixel.blue >> (4 - brightnessShifts)]);
-            }
+            refreshRow[i] = rgb48(backgroundColorCorrectionLUT[currentPixel.red],
+                backgroundColorCorrectionLUT[currentPixel.green],
+                backgroundColorCorrectionLUT[currentPixel.blue]);
         }
     } else {
         for(i=0; i<this->matrixWidth; i++) {
-            currentPixel = *ptr++;
+            currentPixel = currentRefreshBufferPtr[(hardwareY * this->matrixWidth) + i];
             // load background pixel without color correction
-            if(sizeof(RGB) <= 3) {
-                refreshRow[i] = rgb24(currentPixel.red << brightnessShifts,
-                    currentPixel.green << brightnessShifts,
-                    currentPixel.blue << brightnessShifts);
-            } else {
-                refreshRow[i] = rgb48(currentPixel.red << brightnessShifts,
-                    currentPixel.green << brightnessShifts,
-                    currentPixel.blue << brightnessShifts);
-            }
+            refreshRow[i] = currentPixel;
         }
     }
 }
@@ -209,22 +139,28 @@ void SMLayerBackground<RGB, optionFlags>::drawPixel(int16_t x, int16_t y, const 
         return;
 
     // map pixel into hardware buffer before writing
-    if (this->layerRotation == rotation0) {
+    if (this->rotation == rotation0) {
         hwx = x;
         hwy = y;
-    } else if (this->layerRotation == rotation180) {
+    } else if (this->rotation == rotation180) {
         hwx = (this->matrixWidth - 1) - x;
         hwy = (this->matrixHeight - 1) - y;
-    } else if (this->layerRotation == rotation90) {
+    } else if (this->rotation == rotation90) {
         hwx = (this->matrixWidth - 1) - y;
         hwy = x;
-    } else { /* if (layerRotation == rotation270)*/
+    } else { /* if (rotation == rotation270)*/
         hwx = y;
         hwy = (this->matrixHeight - 1) - x;
     }
 
     loadPixelToDrawBuffer(hwx, hwy, color);
 }
+
+#define SWAPint(X,Y) { \
+        int temp = X ; \
+        X = Y ; \
+        Y = temp ; \
+    }
 
 // x0, x1, and y must be in bounds (0-this->localWidth/Height-1), x1 > x0
 template <typename RGB, unsigned int optionFlags>
@@ -264,11 +200,11 @@ void SMLayerBackground<RGB, optionFlags>::drawFastHLine(int16_t x0, int16_t x1, 
         x1 = this->localWidth - 1;
 
     // map to hardware drawline function
-    if (this->layerRotation == rotation0) {
+    if (this->rotation == rotation0) {
         drawHardwareHLine(x0, x1, y, color);
-    } else if (this->layerRotation == rotation180) {
+    } else if (this->rotation == rotation180) {
         drawHardwareHLine((this->matrixWidth - 1) - x1, (this->matrixWidth - 1) - x0, (this->matrixHeight - 1) - y, color);
-    } else if (this->layerRotation == rotation90) {
+    } else if (this->rotation == rotation90) {
         drawHardwareVLine((this->matrixWidth - 1) - y, x0, x1, color);
     } else { /* if (rotation == rotation270)*/
         drawHardwareVLine(y, (this->matrixHeight - 1) - x1, (this->matrixHeight - 1) - x0, color);
@@ -293,13 +229,13 @@ void SMLayerBackground<RGB, optionFlags>::drawFastVLine(int16_t x, int16_t y0, i
         y1 = this->localHeight - 1;
 
     // map to hardware drawline function
-    if (this->layerRotation == rotation0) {
+    if (this->rotation == rotation0) {
         drawHardwareVLine(x, y0, y1, color);
-    } else if (this->layerRotation == rotation180) {
+    } else if (this->rotation == rotation180) {
         drawHardwareVLine((this->matrixWidth - 1) - x, (this->matrixHeight - 1) - y1, (this->matrixHeight - 1) - y0, color);
-    } else if (this->layerRotation == rotation90) {
+    } else if (this->rotation == rotation90) {
         drawHardwareHLine((this->matrixWidth - 1) - y1, (this->matrixWidth - 1) - y0, x, color);
-    } else { /* if (layerRotation == rotation270)*/
+    } else { /* if (rotation == rotation270)*/
         drawHardwareHLine(y0, y1, (this->matrixHeight - 1) - x, color);
     }
 }
@@ -482,16 +418,16 @@ void SMLayerBackground<RGB, optionFlags>::fillCircle(int16_t x0, int16_t y0, uin
 // from https://web.archive.org/web/20120225095359/http://homepage.smc.edu/kennedy_john/belipse.pdf
 template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::drawEllipse(int16_t x0, int16_t y0, uint16_t radiusX, uint16_t radiusY, const RGB& color) {
-    int32_t twoASquare = 2 * radiusX * radiusX;
-    int32_t twoBSquare = 2 * radiusY * radiusY;
+    int16_t twoASquare = 2 * radiusX * radiusX;
+    int16_t twoBSquare = 2 * radiusY * radiusY;
     
-    int32_t x = radiusX;
-    int32_t y = 0;
-    int32_t changeX = radiusY * radiusY * (1 - (2 * radiusX));
-    int32_t changeY = radiusX * radiusX;
-    int32_t ellipseError = 0;
-    int32_t stoppingX = twoBSquare * radiusX;
-    int32_t stoppingY = 0;
+    int16_t x = radiusX;
+    int16_t y = 0;
+    int16_t changeX = radiusY * radiusY * (1 - (2 * radiusX));
+    int16_t changeY = radiusX * radiusX;
+    int16_t ellipseError = 0;
+    int16_t stoppingX = twoBSquare * radiusX;
+    int16_t stoppingY = 0;
     
     while (stoppingX >= stoppingY) {    // first set of points, y' > -1
         drawPixel(x0 + x, y0 + y, color);
@@ -696,10 +632,9 @@ void SMLayerBackground<RGB, optionFlags>::fillFlatSideTriangleInt(int16_t x1, in
     int16_t t1x, t2x, t1y, t2y;
     bool changed1 = false;
     bool changed2 = false;
-    int16_t signx1, signx2, signy1, signy2;
-    int16_t dx1, dy1, dx2, dy2;
+    int8_t signx1, signx2, signy1, signy2, dx1, dy1, dx2, dy2;
     int i;
-    int16_t e1, e2;
+    int8_t e1, e2;
 
     t1x = t2x = x1; t1y = t2y = y1; // Starting points
 
@@ -865,6 +800,14 @@ void SMLayerBackground<RGB, optionFlags>::fillRectangle(int16_t x0, int16_t y0, 
 }
 
 template <typename RGB, unsigned int optionFlags>
+bool SMLayerBackground<RGB, optionFlags>::getBitmapPixelAtXY(uint8_t x, uint8_t y, uint8_t width, uint8_t height, const uint8_t *bitmap) {
+    int cell = (y * ((width / 8) + 1)) + (x / 8);
+
+    uint8_t mask = 0x80 >> (x % 8);
+    return (mask & bitmap[cell]);
+}
+
+template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::setFont(fontChoices newFont) {
     font = (bitmap_font *)fontLookup(newFont);
 }
@@ -884,7 +827,7 @@ void SMLayerBackground<RGB, optionFlags>::drawChar(int16_t x, int16_t y, const R
 
 template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::drawString(int16_t x, int16_t y, const RGB& charColor, const char text[]) {
-    int xcnt, ycnt, offset = 0;
+    int xcnt, ycnt, i = 0, offset = 0;
     char character;
 
     while ((character = text[offset++]) != '\0') {
@@ -902,7 +845,7 @@ void SMLayerBackground<RGB, optionFlags>::drawString(int16_t x, int16_t y, const
 // draw string while clearing background
 template <typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::drawString(int16_t x, int16_t y, const RGB& charColor, const RGB& backColor, const char text[]) {
-    int xcnt, ycnt, offset = 0;
+    int xcnt, ycnt, i = 0, offset = 0;
     char character;
 
     while ((character = text[offset++]) != '\0') {
@@ -967,9 +910,11 @@ void SMLayerBackground<RGB, optionFlags>::swapBuffers(bool copy) {
 #if 1
         // workaround for bizarre (optimization) bug - currentDrawBuffer and currentRefreshBuffer are volatile and are changed by an ISR while we're waiting for swapPending here.  They can't be used as parameters to memcpy directly though.  
         if(currentDrawBuffer)
-            memcpy(backgroundBuffers[1], backgroundBuffers[0], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
+            backgroundBuffers[0] = backgroundBuffers[1];
         else
-            memcpy(backgroundBuffers[0], backgroundBuffers[1], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
+            backgroundBuffers[1] = backgroundBuffers[0];
+            //memcpy(backgroundBuffers[1], backgroundBuffers[0], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
+            //memcpy(backgroundBuffers[0], backgroundBuffers[1], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
 #else
         // Similar code also drawing from volatile variables doesn't work if optimization is turned on: currentDrawBuffer will be equal to currentRefreshBuffer and cause a crash from memcpy copying a buffer to itself.  Why?
         memcpy(backgroundBuffers[currentDrawBuffer], backgroundBuffers[currentRefreshBuffer], sizeof(RGB) * (this->matrixWidth * this->matrixHeight));
@@ -1007,7 +952,7 @@ void SMLayerBackground<RGB, optionFlags>::setBrightness(uint8_t brightness) {
 
 template<typename RGB, unsigned int optionFlags>
 void SMLayerBackground<RGB, optionFlags>::enableColorCorrection(bool enabled) {
-    this->ccEnabled = enabled;
+    this->ccEnabled = sizeof(RGB) <= 3 ? enabled : false;
 }
 
 // reads pixel from drawing buffer, not refresh buffer
@@ -1020,16 +965,16 @@ const RGB SMLayerBackground<RGB, optionFlags>::readPixel(int16_t x, int16_t y) {
         return (RGB){0, 0, 0};
 
     // map pixel into hardware buffer before reading
-    if (this->layerRotation == rotation0) {
+    if (this->rotation == rotation0) {
         hwx = x;
         hwy = y;
-    } else if (this->layerRotation == rotation180) {
+    } else if (this->rotation == rotation180) {
         hwx = (this->matrixWidth - 1) - x;
         hwy = (this->matrixHeight - 1) - y;
-    } else if (this->layerRotation == rotation90) {
+    } else if (this->rotation == rotation90) {
         hwx = (this->matrixWidth - 1) - y;
         hwy = x;
-    } else { /* if (layerRotation == rotation270)*/
+    } else { /* if (rotation == rotation270)*/
         hwx = y;
         hwy = (this->matrixHeight - 1) - x;
     }
@@ -1046,3 +991,5 @@ template<typename RGB, unsigned int optionFlags>
 RGB *SMLayerBackground<RGB, optionFlags>::getCurrentRefreshRow(uint16_t y) {
   return &currentRefreshBufferPtr[y*this->matrixWidth];
 }
+
+
